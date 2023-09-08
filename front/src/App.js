@@ -2,8 +2,8 @@ import React from 'react';
 import FileUpload from './components/FileUpload';
 
 const App = () => {
-  const handleUpload = (files) => {
-    console.log('Arquivo selecionado:', files[0]);
+  const handleUpload = (file) => {
+    console.log('Arquivo selecionado:', file.name);
   };
 
   return (
