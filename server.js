@@ -6,6 +6,8 @@ const multer = require("multer");
 const path = require("path");
 const cors = require("cors");
 
+const util = require("util");
+
 const app = express();
 const port = 3001;
 
@@ -84,54 +86,64 @@ app.post("/process-file", async (req, res) => {
             const productCode = row.product_code;
             const newPrice = parseFloat(row.new_price);
 
-            const updateQuery = `
+            const updateProductQuery = `
               UPDATE products
               SET sales_price = ?
               WHERE code = ?
             `;
-            await db.query(updateQuery, [newPrice, productCode]);
+            await db.query(updateProductQuery, [newPrice, productCode]);
 
             const packQuery = `
               SELECT pack_id, qty
-              FROM packs
+              FROM shopper.packs
               WHERE product_id = ?
             `;
-            const packResults = await db.query(packQuery, [productCode]);
 
-            for (const packRow of packResults) {
-              const packId = packRow.pack_id;
-              const qty = packRow.qty;
+            const queryAsync = util.promisify(db.query).bind(db);
 
-              const packPriceQuery = `
-                SELECT SUM(p.sales_price * ?) AS new_pack_price
-                FROM products p
-                WHERE p.code = ?
-              `;
-              const packPriceResult = await db.query(packPriceQuery, [qty, productCode]);
-              const newPackPrice = parseFloat(packPriceResult[0].new_pack_price);
+            const [packResult] = await queryAsync(packQuery, [productCode]);
 
-              const updatePackQuery = `
-                UPDATE products
-                SET sales_price = ?
-                WHERE code = ?
-              `;
-              await db.query(updatePackQuery, [newPackPrice, packId]);
-            }
+            const packId = packResult.pack_id;
+            const qty = packResult.qty;
+
+            const newPackPrice = newPrice * qty;
+
+            const updatePackProductQuery = `
+              UPDATE products
+              SET sales_price = ?
+              WHERE code = ?
+            `;
+            await db.query(updatePackProductQuery, [newPackPrice, packId]);
           }
-          console.log(`Preços dos produtos atualizados com sucesso para o arquivo ${csvFile}.`);
+
+          const uploadDirectory = path.join(__dirname, "uploads");
+          deleteFilesInDirectory(uploadDirectory);
+
+          console.log(
+            `Preços dos produtos e pacotes atualizados com sucesso para o arquivo ${csvFile}.`
+          );
         })
         .on("error", (error) => {
           console.error(`Erro ao ler o arquivo CSV ${csvFile}:`, error);
         });
     }
 
-    res.status(200).send("Preços dos produtos e pacotes atualizados com sucesso.");
+    res
+      .status(200)
+      .send("Preços dos produtos e pacotes atualizados com sucesso.");
   } catch (error) {
-    console.error("Erro ao processar os arquivos CSV e atualizar os preços:", error);
-    res.status(500).send("Erro ao processar os arquivos CSV e atualizar os preços.");
+    res
+      .status(500)
+      .send("Erro ao processar os arquivos CSV e atualizar os preços.");
   }
 });
 
+const deleteFilesInDirectory = (directory) => {
+  fs.readdirSync(directory).forEach((file) => {
+    const filePath = path.join(directory, file);
+    fs.unlinkSync(filePath);
+  });
+};
 
 app.listen(port, () => {
   console.log(`Servidor Node.js rodando na porta ${port}`);
