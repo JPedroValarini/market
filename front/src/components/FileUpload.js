@@ -12,8 +12,11 @@ const FileUpload = ({ onUpload }) => {
   const processFile = async () => {
     if (selectedFile) {
       try {
+        const timestamp = new Date().toISOString().replace(/[-:.]/g, "_");
+        const fileName = `${timestamp}_${selectedFile.name}`;
+
         const formData = new FormData();
-        formData.append("file", selectedFile);
+        formData.append("file", selectedFile, fileName);
 
         const uploadResponse = await fetch("http://localhost:3001/upload", {
           method: "POST",

@@ -57,44 +57,81 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 
 app.post("/process-file", async (req, res) => {
   try {
-    const filePath = path.join(
-      __dirname,
-      "uploads",
-      "atualizacao_preco_exemplo.csv"
-    );
-    const results = [];
+    const uploadFolder = path.join(__dirname, "uploads");
+    const files = fs.readdirSync(uploadFolder);
 
-    const fileStream = fs.createReadStream(filePath);
+    const csvFiles = files.filter((file) => file.endsWith(".csv"));
 
-    fileStream
-      .pipe(csv())
-      .on("data", (row) => {
-        results.push(row);
-      })
-      .on("end", async () => {
-        for (const row of results) {
-          const productCode = row.product_code;
-          const newPrice = parseFloat(row.new_price);
+    if (csvFiles.length === 0) {
+      console.error("Nenhum arquivo CSV encontrado na pasta 'uploads'.");
+      res.status(404).send("Nenhum arquivo CSV encontrado.");
+      return;
+    }
 
-          const updateQuery = `
-            UPDATE products
-            SET sales_price = ?
-            WHERE code = ?
-          `;
+    for (const csvFile of csvFiles) {
+      const filePath = path.join(uploadFolder, csvFile);
+      const results = [];
 
-          await db.query(updateQuery, [newPrice, productCode]);
-        }
-        console.log("Preços dos produtos atualizados com sucesso.");
-        res.status(200).send("Preços dos produtos atualizados com sucesso");
-      })
-      .on("error", (error) => {
-        console.error("Erro ao ler o arquivo CSV:", error);
-      });
+      const fileStream = fs.createReadStream(filePath);
+
+      fileStream
+        .pipe(csv())
+        .on("data", (row) => {
+          results.push(row);
+        })
+        .on("end", async () => {
+          for (const row of results) {
+            const productCode = row.product_code;
+            const newPrice = parseFloat(row.new_price);
+
+            const updateQuery = `
+              UPDATE products
+              SET sales_price = ?
+              WHERE code = ?
+            `;
+            await db.query(updateQuery, [newPrice, productCode]);
+
+            const packQuery = `
+              SELECT pack_id, qty
+              FROM packs
+              WHERE product_id = ?
+            `;
+            const packResults = await db.query(packQuery, [productCode]);
+
+            for (const packRow of packResults) {
+              const packId = packRow.pack_id;
+              const qty = packRow.qty;
+
+              const packPriceQuery = `
+                SELECT SUM(p.sales_price * ?) AS new_pack_price
+                FROM products p
+                WHERE p.code = ?
+              `;
+              const packPriceResult = await db.query(packPriceQuery, [qty, productCode]);
+              const newPackPrice = parseFloat(packPriceResult[0].new_pack_price);
+
+              const updatePackQuery = `
+                UPDATE products
+                SET sales_price = ?
+                WHERE code = ?
+              `;
+              await db.query(updatePackQuery, [newPackPrice, packId]);
+            }
+          }
+          console.log(`Preços dos produtos atualizados com sucesso para o arquivo ${csvFile}.`);
+        })
+        .on("error", (error) => {
+          console.error(`Erro ao ler o arquivo CSV ${csvFile}:`, error);
+        });
+    }
+
+    res.status(200).send("Preços dos produtos e pacotes atualizados com sucesso.");
   } catch (error) {
-    console.error("Erro ao processar o arquivo e atualizar os preços:", error);
-    res.status(500).send("Erro ao processar o arquivo e atualizar os preços");
+    console.error("Erro ao processar os arquivos CSV e atualizar os preços:", error);
+    res.status(500).send("Erro ao processar os arquivos CSV e atualizar os preços.");
   }
 });
+
 
 app.listen(port, () => {
   console.log(`Servidor Node.js rodando na porta ${port}`);
