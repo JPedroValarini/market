@@ -56,7 +56,6 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     res.status(500).send("Erro ao enviar o arquivo");
   }
 });
-
 app.post("/process-file", async (req, res) => {
   try {
     const uploadFolder = path.join(__dirname, "uploads");
@@ -82,13 +81,6 @@ app.post("/process-file", async (req, res) => {
           const productCode = row.product_code;
           const newPrice = parseFloat(row.new_price);
 
-          const updateProductQuery = `
-            UPDATE products
-            SET sales_price = ?
-            WHERE code = ?
-          `;
-          await db.query(updateProductQuery, [newPrice, productCode]);
-
           const packQuery = `
             SELECT pack_id, qty
             FROM shopper.packs
@@ -96,6 +88,56 @@ app.post("/process-file", async (req, res) => {
           `;
 
           const queryAsync = util.promisify(db.query).bind(db);
+
+          try {
+            // Consulta o produto atual para validar sales_price
+            const getProductQuery = `
+              SELECT code, sales_price, cost_price
+              FROM products
+              WHERE code = ?
+            `;
+            const [productResult] = await queryAsync(getProductQuery, [
+              productCode,
+            ]);
+
+            if (!productResult) {
+              console.error(`Produto com código ${productCode} não encontrado.`);
+              return;
+            }
+
+            const currentPrice = parseFloat(productResult.sales_price);
+            const costPrice = parseFloat(productResult.cost_price);
+
+            // Verifica se o novo preço é menor que cost_price
+            if (newPrice < costPrice) {
+              console.error(
+                `O novo preço ${newPrice} é menor que o cost_price ${costPrice} para o produto com código ${productCode}.`
+              );
+              return;
+            }
+
+            // Verifica se a diferença entre o novo preço e o atual é maior que 10%
+            const priceDifference = Math.abs(currentPrice - newPrice);
+            const maxPriceDifference = currentPrice * 0.1;
+
+            if (priceDifference > maxPriceDifference) {
+              console.error(
+                `A diferença entre o novo preço ${newPrice} e o preço atual ${currentPrice} excede 10% para o produto com código ${productCode}.`
+              );
+              return;
+            }
+
+            const updateProductQuery = `
+              UPDATE products
+              SET sales_price = ?
+              WHERE code = ?
+            `;
+
+            await db.query(updateProductQuery, [newPrice, productCode]);
+          } catch (err) {
+            console.error(`Erro ao consultar o produto com código ${productCode}:`, err);
+          }
+
           const packResults = await queryAsync(packQuery, [productCode]);
 
           if (packResults && packResults.length > 0) {
@@ -149,11 +191,13 @@ app.post("/process-file", async (req, res) => {
       .status(200)
       .send("Preços dos produtos e pacotes atualizados com sucesso.");
   } catch (error) {
+    console.error("Erro ao processar os arquivos CSV e atualizar os preços:", error);
     res
       .status(500)
       .send("Erro ao processar os arquivos CSV e atualizar os preços.");
   }
 });
+
 
 const deleteFilesInDirectory = (directory) => {
   fs.readdirSync(directory).forEach((file) => {
