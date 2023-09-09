@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import "./FileUpload.css";
+import { ToastContainer, toast } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 
 const FileUpload = ({ onUpload }) => {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -24,20 +26,25 @@ const FileUpload = ({ onUpload }) => {
         });
 
         if (uploadResponse.ok) {
-          console.log("Arquivo enviado e salvo com sucesso.");
-
           await fetch("http://localhost:3001/process-file", {
             method: "POST",
           });
 
-          console.log("Arquivo processado com sucesso.");
+          toast.success("Arquivo processado com sucesso.");
           onUpload(selectedFile);
+
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+
         } else {
-          console.error("Erro ao enviar o arquivo.");
+          toast.error("Erro ao enviar o arquivo.");
         }
       } catch (error) {
-        console.error("Erro ao enviar ou processar o arquivo:", error);
+        toast.error("Erro ao enviar ou processar o arquivo: " + error.message);
       }
+    } else {
+      toast.warn("Nenhum arquivo selecionado.");
     }
   };
 
@@ -45,7 +52,10 @@ const FileUpload = ({ onUpload }) => {
     <div>
       <input type="file" onChange={onFileChange} />
       {selectedFile && (
-        <button onClick={processFile}>Enviar e Processar Arquivo</button>
+        <div>
+          <button onClick={processFile}>Enviar e Processar Arquivo</button>
+          <ToastContainer />
+        </div>
       )}
     </div>
   );
