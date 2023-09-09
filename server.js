@@ -78,44 +78,61 @@ app.post("/process-file", async (req, res) => {
 
       fileStream
         .pipe(csv())
-        .on("data", (row) => {
-          results.push(row);
+        .on("data", async (row) => {
+          const productCode = row.product_code;
+          const newPrice = parseFloat(row.new_price);
+
+          const updateProductQuery = `
+            UPDATE products
+            SET sales_price = ?
+            WHERE code = ?
+          `;
+          await db.query(updateProductQuery, [newPrice, productCode]);
+
+          const packQuery = `
+            SELECT pack_id, qty
+            FROM shopper.packs
+            WHERE product_id = ?
+          `;
+
+          const queryAsync = util.promisify(db.query).bind(db);
+          const packResults = await queryAsync(packQuery, [productCode]);
+
+          if (packResults && packResults.length > 0) {
+            for (const packResult of packResults) {
+              const packId = packResult.pack_id;
+              const qty = packResult.qty;
+
+              const packPriceQuery = `
+                SELECT SUM(p.sales_price) AS new_pack_price
+                FROM packs AS pk
+                INNER JOIN products AS p ON pk.product_id = p.code
+                WHERE pk.pack_id = ?
+              `;
+              const packPriceResult = await queryAsync(packPriceQuery, [
+                packId,
+              ]);
+
+              if (packPriceResult && packPriceResult.length > 0) {
+                const newPackPrice = parseFloat(
+                  packPriceResult[0].new_pack_price
+                );
+                const updatedPackPrice = newPackPrice * qty;
+
+                const updatePackProductQuery = `
+                  UPDATE products
+                  SET sales_price = ?
+                  WHERE code = ?
+                `;
+                await db.query(updatePackProductQuery, [
+                  updatedPackPrice,
+                  packId,
+                ]);
+              }
+            }
+          }
         })
         .on("end", async () => {
-          for (const row of results) {
-            const productCode = row.product_code;
-            const newPrice = parseFloat(row.new_price);
-
-            const updateProductQuery = `
-              UPDATE products
-              SET sales_price = ?
-              WHERE code = ?
-            `;
-            await db.query(updateProductQuery, [newPrice, productCode]);
-
-            const packQuery = `
-              SELECT pack_id, qty
-              FROM shopper.packs
-              WHERE product_id = ?
-            `;
-
-            const queryAsync = util.promisify(db.query).bind(db);
-
-            const [packResult] = await queryAsync(packQuery, [productCode]);
-
-            const packId = packResult.pack_id;
-            const qty = packResult.qty;
-
-            const newPackPrice = newPrice * qty;
-
-            const updatePackProductQuery = `
-              UPDATE products
-              SET sales_price = ?
-              WHERE code = ?
-            `;
-            await db.query(updatePackProductQuery, [newPackPrice, packId]);
-          }
-
           const uploadDirectory = path.join(__dirname, "uploads");
           deleteFilesInDirectory(uploadDirectory);
 
